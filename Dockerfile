@@ -1,32 +1,38 @@
-# Use a slim base to keep image size down
+# ─── STAGE 1: Build ─────────────────────────────────────
+FROM python:3.10-slim AS builder
+
+# Install ffmpeg, pip-compile tool, etc.
+RUN apt-get update \
+ && apt-get install -y ffmpeg gcc build-essential \
+ && rm -rf /var/lib/apt/lists/*
+
+WORKDIR /app
+COPY requirements.txt .
+
+# Install all deps into /deps
+RUN pip install --no-cache-dir --prefix=/deps \
+      torch==2.2.0+cpu \
+      openai-whisper \
+      ffmpeg-python \
+      streamlit==1.35.0
+
+# Copy your app files
+COPY app.py .
+
+# ─── STAGE 2: Runtime ────────────────────────────────────
 FROM python:3.10-slim
 
-# Use bash to support scripting features
-SHELL ["/bin/bash", "-lc"]
-
-# Install ffmpeg system binary
+# Copy ffmpeg binary
 RUN apt-get update \
  && apt-get install -y ffmpeg \
  && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
+# Pull in only the installed site-packages
+COPY --from=builder /deps /usr/local
 
-# Copy your requirements
-COPY requirements.txt .
+# Copy app
+COPY --from=builder /app/app.py ./app.py
 
-# 1) Extract all requirements except torch
-RUN grep -v '^torch==' requirements.txt > req_no_torch.txt
-
-# 2) Install everything but torch
-RUN pip install --no-cache-dir -r req_no_torch.txt
-
-# 3) Install CPU-only torch from PyTorch CPU index
-RUN pip install --no-cache-dir \
-      --index-url https://download.pytorch.org/whl/cpu \
-      torch==2.2.0+cpu
-
-# Copy the rest of your app files
-COPY . .
-
-# Start Streamlit
+# Start
 CMD ["streamlit", "run", "app.py", "--server.port", "8080", "--server.enableCORS", "false"]
