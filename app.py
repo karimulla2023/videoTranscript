@@ -1,32 +1,35 @@
-import streamlit as st
+import gradio as gr
 import whisper
 import tempfile
+import subprocess
 import os
 
-# Load the lightweight Whisper model
-@st.cache_resource
-def load_model():
-    return whisper.load_model("tiny")
+model = whisper.load_model("tiny.en")
 
-model = load_model()
+def transcribe_video(video_file):
+    # Save video locally
+    path = tempfile.mktemp(suffix=".mp4")
+    with open(path, "wb") as f:
+        f.write(video_file.read())
 
-st.title("Video Transcription App")
-st.write("Upload a video file to get a transcript.")
+    # Extract audio
+    audio_path = tempfile.mktemp(suffix=".wav")
+    subprocess.run([
+        "ffmpeg", "-y", "-i", path,
+        "-vn", "-ac", "1", "-ar", "16000", audio_path
+    ], check=True)
 
-uploaded_file = st.file_uploader("Choose a video...", type=["mp4", "mov", "avi", "mkv"])
+    # Transcribe
+    res = model.transcribe(audio_path, fp16=False)
+    # Cleanup
+    os.remove(path); os.remove(audio_path)
+    return res["text"]
 
-if uploaded_file is not None:
-    st.video(uploaded_file)
+demo = gr.Interface(
+    fn=transcribe_video,
+    inputs=gr.File(label="Upload video"),
+    outputs=gr.Textbox(label="Transcript"),
+    title="Video Transcription with Whisper"
+)
 
-    with tempfile.NamedTemporaryFile(delete=False, suffix=".mp4") as temp_video:
-        temp_video.write(uploaded_file.read())
-        temp_path = temp_video.name
-
-    st.write("Transcribing...")
-    result = model.transcribe(temp_path)
-    st.success("Done!")
-
-    st.subheader("Transcript:")
-    st.text(result["text"])
-
-    os.remove(temp_path)
+demo.launch()
